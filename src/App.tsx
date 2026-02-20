@@ -16,9 +16,21 @@ import {
   UserCheck,
   UserX,
   Clock,
-  Activity
+  Activity,
+  LogOut,
+  Lock,
+  User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+type UserRole = 'teacher' | 'student';
+
+type AuthUser = {
+  id: number;
+  username: string;
+  role: UserRole;
+  student_id: number | null;
+};
 
 type Student = {
   id: number;
@@ -58,7 +70,11 @@ type StudentDetail = Student & {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'students'>('dashboard');
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+  
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'my-profile'>('dashboard');
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
   const [studentDetail, setStudentDetail] = useState<StudentDetail | null>(null);
@@ -67,22 +83,73 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    fetchData();
+    checkAuth();
   }, []);
 
-  const fetchData = async () => {
+  useEffect(() => {
+    if (user) {
+      if (user.role === 'teacher') {
+        fetchTeacherData();
+      } else if (user.role === 'student' && user.student_id) {
+        fetchStudentDetail(user.student_id);
+        setActiveTab('my-profile');
+      }
+    }
+  }, [user]);
+
+  const checkAuth = async () => {
+    try {
+      const res = await fetch('/api/me');
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+      }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUser(data.user);
+      } else {
+        setLoginError(data.message);
+      }
+    } catch (error) {
+      setLoginError('Terjadi kesalahan saat login');
+    }
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    setUser(null);
+    setStudentDetail(null);
+    setStudents([]);
+    setStats(null);
+  };
+
+  const fetchTeacherData = async () => {
     setLoading(true);
     try {
       const [studentsRes, statsRes] = await Promise.all([
         fetch('/api/students'),
         fetch('/api/stats')
       ]);
-      const studentsData = await studentsRes.json();
-      const statsData = await statsRes.json();
-      setStudents(studentsData);
-      setStats(statsData);
+      if (studentsRes.ok) setStudents(await studentsRes.json());
+      if (statsRes.ok) setStats(await statsRes.json());
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching teacher data:', error);
     } finally {
       setLoading(false);
     }
@@ -91,8 +158,10 @@ export default function App() {
   const fetchStudentDetail = async (id: number) => {
     try {
       const res = await fetch(`/api/students/${id}`);
-      const data = await res.json();
-      setStudentDetail(data);
+      if (res.ok) {
+        const data = await res.json();
+        setStudentDetail(data);
+      }
     } catch (error) {
       console.error('Error fetching student detail:', error);
     }
@@ -102,6 +171,85 @@ export default function App() {
     setSelectedStudentId(id);
     fetchStudentDetail(id);
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5]">
+        <div className="animate-spin text-emerald-600">
+          <Activity size={40} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5] p-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white p-8 rounded-3xl shadow-xl border border-black/5"
+        >
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
+              <GraduationCap size={40} />
+            </div>
+            <h1 className="text-2xl font-bold">EduTrack Login</h1>
+            <p className="text-gray-500 text-sm">Masuk untuk memantau perkembangan siswa</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Username</label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input 
+                  type="text" 
+                  required
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-black/5 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  placeholder="Masukkan username"
+                  value={loginForm.username}
+                  onChange={e => setLoginForm({...loginForm, username: e.target.value})}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input 
+                  type="password" 
+                  required
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-black/5 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  placeholder="Masukkan password"
+                  value={loginForm.password}
+                  onChange={e => setLoginForm({...loginForm, password: e.target.value})}
+                />
+              </div>
+            </div>
+
+            {loginError && (
+              <p className="text-red-500 text-sm text-center font-medium">{loginError}</p>
+            )}
+
+            <button 
+              type="submit"
+              className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200"
+            >
+              Masuk Sekarang
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-black/5 text-center">
+            <p className="text-xs text-gray-400">
+              Gunakan akun Guru: <span className="font-mono font-bold text-gray-600">guru / guru123</span><br/>
+              Gunakan akun Siswa: <span className="font-mono font-bold text-gray-600">ahmad / siswa123</span>
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   const filteredStudents = students.filter(s => 
     s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -121,39 +269,60 @@ export default function App() {
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-2">
-          <button 
-            onClick={() => { setActiveTab('dashboard'); setSelectedStudentId(null); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
-          >
-            <LayoutDashboard size={20} />
-            <span>Dashboard</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('students')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'students' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
-          >
-            <Users size={20} />
-            <span>Daftar Siswa</span>
-          </button>
+          {user.role === 'teacher' ? (
+            <>
+              <button 
+                onClick={() => { setActiveTab('dashboard'); setSelectedStudentId(null); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                <LayoutDashboard size={20} />
+                <span>Dashboard</span>
+              </button>
+              <button 
+                onClick={() => setActiveTab('students')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'students' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                <Users size={20} />
+                <span>Daftar Siswa</span>
+              </button>
+            </>
+          ) : (
+            <button 
+              onClick={() => setActiveTab('my-profile')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'my-profile' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              <User size={20} />
+              <span>Profil Saya</span>
+            </button>
+          )}
         </nav>
 
         <div className="p-6 border-t border-black/5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold">
-              AD
-            </div>
-            <div>
-              <p className="text-sm font-semibold">Admin Sekolah</p>
-              <p className="text-xs text-gray-400">Petugas Monitoring</p>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold">
+                {user.username.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-sm font-semibold truncate w-24">{user.username}</p>
+                <p className="text-xs text-gray-400 capitalize">{user.role}</p>
+              </div>
             </div>
           </div>
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 py-2 text-red-500 hover:bg-red-50 rounded-lg transition-all text-sm font-medium"
+          >
+            <LogOut size={16} />
+            <span>Keluar</span>
+          </button>
         </div>
       </div>
 
       {/* Main Content */}
       <main className="ml-64 p-8">
         <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && !selectedStudentId && (
+          {activeTab === 'dashboard' && user.role === 'teacher' && !selectedStudentId && (
             <motion.div 
               key="dashboard"
               initial={{ opacity: 0, y: 20 }}
@@ -254,7 +423,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeTab === 'students' && !selectedStudentId && (
+          {activeTab === 'students' && user.role === 'teacher' && !selectedStudentId && (
             <motion.div 
               key="students"
               initial={{ opacity: 0, x: 20 }}
@@ -330,7 +499,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {selectedStudentId && studentDetail && (
+          {(selectedStudentId || (activeTab === 'my-profile' && user.role === 'student')) && studentDetail && (
             <motion.div 
               key="student-detail"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -338,12 +507,14 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="space-y-8"
             >
-              <button 
-                onClick={() => setSelectedStudentId(null)}
-                className="text-sm text-gray-500 hover:text-emerald-600 flex items-center gap-1 transition-colors"
-              >
-                ← Kembali ke Daftar
-              </button>
+              {user.role === 'teacher' && (
+                <button 
+                  onClick={() => setSelectedStudentId(null)}
+                  className="text-sm text-gray-500 hover:text-emerald-600 flex items-center gap-1 transition-colors"
+                >
+                  ← Kembali ke Daftar
+                </button>
+              )}
 
               <header className="flex items-end gap-6">
                 <div className="w-24 h-24 rounded-3xl bg-emerald-600 flex items-center justify-center text-white text-4xl font-bold shadow-lg shadow-emerald-200">
@@ -369,7 +540,9 @@ export default function App() {
                         <Calendar size={18} className="text-emerald-600" />
                         Kehadiran
                       </h3>
-                      <button className="text-xs text-emerald-600 font-bold uppercase hover:underline">Input</button>
+                      {user.role === 'teacher' && (
+                        <button className="text-xs text-emerald-600 font-bold uppercase hover:underline">Input</button>
+                      )}
                     </div>
                     <div className="space-y-4">
                       {studentDetail.attendance.length > 0 ? (
@@ -400,7 +573,9 @@ export default function App() {
                         <GraduationCap size={18} className="text-blue-600" />
                         Nilai Akademik
                       </h3>
-                      <button className="text-xs text-blue-600 font-bold uppercase hover:underline">Tambah Nilai</button>
+                      {user.role === 'teacher' && (
+                        <button className="text-xs text-blue-600 font-bold uppercase hover:underline">Tambah Nilai</button>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {studentDetail.grades.length > 0 ? (
@@ -425,7 +600,9 @@ export default function App() {
                         <AlertCircle size={18} className="text-amber-600" />
                         Catatan Perilaku
                       </h3>
-                      <button className="text-xs text-amber-600 font-bold uppercase hover:underline">Tambah Catatan</button>
+                      {user.role === 'teacher' && (
+                        <button className="text-xs text-amber-600 font-bold uppercase hover:underline">Tambah Catatan</button>
+                      )}
                     </div>
                     <div className="space-y-4">
                       {studentDetail.behavior.length > 0 ? (
